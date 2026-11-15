@@ -1,0 +1,8 @@
+{
+  "name": "mi-video-ia",
+  "version": "1.0.0",
+  "type": "module",
+  "dependencies": {
+    "@gradio/client": "^1.11.0"
+  }
+}
