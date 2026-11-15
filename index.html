@@ -1,0 +1,208 @@
+﻿<!DOCTYPE html>
+<html lang="es" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Imagen a Vídeo IA</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-zinc-950 text-zinc-100 min-h-screen font-sans p-4 md:p-8">
+  <div class="max-w-2xl mx-auto space-y-6">
+    
+    <!-- Cabecera -->
+    <header class="border-b border-zinc-800 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div>
+        <h1 class="text-2xl font-bold tracking-tight text-white">Imagen a Vídeo</h1>
+        <p class="text-sm text-zinc-400">Anima cualquier fotografía con Wan I2V</p>
+      </div>
+      <input type="password" id="appPassword" placeholder="Clave de acceso" 
+        class="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500 w-full sm:w-40" />
+    </header>
+
+    <!-- Panel Principal -->
+    <div class="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 space-y-5">
+      
+      <!-- Zona de subida de imagen -->
+      <div>
+        <label class="block text-sm font-medium text-zinc-300 mb-2">1. Selecciona o arrastra tu imagen</label>
+        <div id="dropZone" onclick="document.getElementById('imageInput').click()" 
+          class="border-2 border-dashed border-zinc-700 hover:border-indigo-500 rounded-xl p-6 text-center cursor-pointer transition bg-zinc-950/50">
+          <input type="file" id="imageInput" accept="image/*" class="hidden" />
+          <p id="dropText" class="text-sm text-zinc-400">Haz clic para subir una foto o arrástrala aquí</p>
+          <img id="previewImg" class="hidden max-h-64 mx-auto rounded-lg shadow-lg" />
+        </div>
+      </div>
+
+      <!-- Descripción del movimiento -->
+      <div>
+        <div class="flex justify-between items-center mb-2">
+          <label class="text-sm font-medium text-zinc-300">2. Describe el movimiento (mejor en inglés)</label>
+        </div>
+        <textarea id="prompt" rows="3" placeholder="Ej: Smooth slow camera push in, natural sunlight shifting slightly, gentle breeze..." 
+          class="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-sm text-white focus:outline-none focus:border-indigo-500"></textarea>
+        
+        <!-- Atajos rápidos de cámara -->
+        <div class="flex flex-wrap gap-2 mt-2">
+          <button type="button" onclick="addPreset('Smooth slow camera push in, cinematic lighting')" class="text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-300 px-2.5 py-1 rounded-md transition">+ Zoom suave</button>
+          <button type="button" onclick="addPreset('Slow lateral pan from left to right, realistic motion')" class="text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-300 px-2.5 py-1 rounded-md transition">+ Paneo lateral</button>
+          <button type="button" onclick="addPreset('Subtle natural movement, gentle wind, atmospheric lighting')" class="text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-300 px-2.5 py-1 rounded-md transition">+ Movimiento sutil</button>
+        </div>
+      </div>
+
+      <button onclick="generateVideo()" id="generateBtn" 
+        class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-3 px-6 rounded-xl transition">
+        Animar Imagen
+      </button>
+    </div>
+
+    <!-- Barra de Progreso -->
+    <div id="statusBox" class="hidden bg-zinc-900 border border-zinc-800 rounded-2xl p-6 text-center space-y-3">
+      <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-500 mx-auto"></div>
+      <p id="statusText" class="text-sm text-zinc-300">Preparando imagen...</p>
+    </div>
+
+    <!-- Resultado Final -->
+    <div id="resultBox" class="hidden bg-zinc-900 border border-zinc-800 rounded-2xl p-4 space-y-4">
+      <video id="outputVideo" controls autoplay loop class="w-full rounded-xl max-h-[520px] bg-black"></video>
+      <div class="flex justify-end">
+        <a id="downloadBtn" href="#" download="animacion-ia.mp4" 
+          class="bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium py-2 px-5 rounded-lg transition">
+          Descargar MP4
+        </a>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    let optimizedBase64 = null;
+
+    // Guardar contraseña en el navegador para no escribirla cada vez
+    const passInput = document.getElementById('appPassword');
+    passInput.value = localStorage.getItem('studio_pass') || '';
+    passInput.addEventListener('input', () => localStorage.setItem('studio_pass', passInput.value));
+
+    function addPreset(text) {
+      const promptEl = document.getElementById('prompt');
+      promptEl.value = promptEl.value ? `${promptEl.value.trim()}, ${text}` : text;
+    }
+
+    // Gestión de Drag & Drop y selección de archivo
+    const dropZone = document.getElementById('dropZone');
+    const imageInput = document.getElementById('imageInput');
+
+    dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('border-indigo-500'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('border-indigo-500'));
+    dropZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropZone.classList.remove('border-indigo-500');
+      if (e.dataTransfer.files[0]) processImage(e.dataTransfer.files[0]);
+    });
+    imageInput.addEventListener('change', (e) => {
+      if (e.target.files[0]) processImage(e.target.files[0]);
+    });
+
+    // Redimensiona la imagen en canvas para evitar errores de payload grande en Vercel
+    function processImage(file) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const MAX_SIZE = 1280;
+          let width = img.width;
+          let height = img.height;
+
+          if (width > height && width > MAX_SIZE) {
+            height *= MAX_SIZE / width;
+            width = MAX_SIZE;
+          } else if (height > MAX_SIZE) {
+            width *= MAX_SIZE / height;
+            height = MAX_SIZE;
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+
+          optimizedBase64 = canvas.toDataURL('image/jpeg', 0.88);
+          
+          const preview = document.getElementById('previewImg');
+          preview.src = optimizedBase64;
+          preview.classList.remove('hidden');
+          document.getElementById('dropText').classList.add('hidden');
+        };
+        img.src = event.target.result;
+      };
+      reader.readAsDataURL(file);
+    }
+
+    async function generateVideo() {
+      const prompt = document.getElementById('prompt').value.trim();
+      const password = passInput.value.trim();
+
+      if (!optimizedBase64) return alert('Primero sube una imagen.');
+      if (!prompt) return alert('Describe cómo quieres que se mueva la escena.');
+
+      const btn = document.getElementById('generateBtn');
+      const statusBox = document.getElementById('statusBox');
+      const statusText = document.getElementById('statusText');
+      const resultBox = document.getElementById('resultBox');
+
+      btn.disabled = true;
+      btn.classList.add('opacity-50');
+      resultBox.classList.add('hidden');
+      statusBox.classList.remove('hidden');
+      statusText.innerText = 'Subiendo imagen y arrancando motor Wan I2V...';
+
+      try {
+        const startRes = await fetch('/api/i2v', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'start',
+            password,
+            prompt,
+            imageUrl: optimizedBase64
+          })
+        });
+
+        const startData = await startRes.json();
+        if (!startRes.ok) throw new Error(startData.error || 'Error al iniciar');
+
+        const { requestId } = startData;
+
+        // Consulta cada 4 segundos hasta que finalice
+        while (true) {
+          await new Promise(r => setTimeout(r, 4000));
+          statusText.innerText = 'Generando vídeo (suele tardar entre 25 y 45 segundos)...';
+
+          const pollRes = await fetch('/api/i2v', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'status', password, requestId })
+          });
+
+          const pollData = await pollRes.json();
+          if (!pollRes.ok) throw new Error(pollData.error || 'Error comprobando estado');
+
+          if (pollData.status === 'COMPLETED') {
+            const videoEl = document.getElementById('outputVideo');
+            videoEl.src = pollData.videoUrl;
+            document.getElementById('downloadBtn').href = pollData.videoUrl;
+            resultBox.classList.remove('hidden');
+            break;
+          }
+        }
+      } catch (err) {
+        alert(err.message);
+      } finally {
+        btn.disabled = false;
+        btn.classList.remove('opacity-50');
+        statusBox.classList.add('hidden');
+      }
+    }
+  </script>
+</body>
+</html>
