@@ -13,10 +13,10 @@
     <header class="border-b border-zinc-800 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
       <div>
         <h1 class="text-2xl font-bold tracking-tight text-white">Imagen a Vídeo</h1>
-        <p class="text-sm text-zinc-400">Motor gratuito Hugging Face (LTX-Video)</p>
+        <p class="text-sm text-zinc-400">Conexión directa gratuita (LTX-Video ZeroGPU)</p>
       </div>
-      <input type="password" id="appPassword" placeholder="Clave de acceso" 
-        class="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500 w-full sm:w-40" />
+      <input type="password" id="hfToken" placeholder="Tu token hf_..." 
+        class="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500 w-full sm:w-48" />
     </header>
 
     <!-- Panel Principal -->
@@ -35,9 +35,7 @@
 
       <!-- Descripción del movimiento -->
       <div>
-        <div class="flex justify-between items-center mb-2">
-          <label class="text-sm font-medium text-zinc-300">2. Describe el movimiento (mejor en inglés)</label>
-        </div>
+        <label class="block text-sm font-medium text-zinc-300 mb-2">2. Describe el movimiento (mejor en inglés)</label>
         <textarea id="prompt" rows="3" placeholder="Ej: Smooth slow camera push in, natural sunlight shifting slightly, gentle breeze..." 
           class="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-sm text-white focus:outline-none focus:border-indigo-500"></textarea>
         
@@ -49,7 +47,7 @@
         </div>
       </div>
 
-      <button onclick="generateVideo()" id="generateBtn" 
+      <button id="generateBtn" 
         class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-3 px-6 rounded-xl transition">
         Animar Imagen
       </button>
@@ -58,14 +56,14 @@
     <!-- Barra de Progreso -->
     <div id="statusBox" class="hidden bg-zinc-900 border border-zinc-800 rounded-2xl p-6 text-center space-y-3">
       <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-500 mx-auto"></div>
-      <p id="statusText" class="text-sm text-zinc-300">Generando vídeo en Hugging Face (tarda 20-50 segundos)...</p>
+      <p id="statusText" class="text-sm text-zinc-300">Conectando con la GPU gratuita de Hugging Face...</p>
     </div>
 
     <!-- Resultado Final -->
     <div id="resultBox" class="hidden bg-zinc-900 border border-zinc-800 rounded-2xl p-4 space-y-4">
       <video id="outputVideo" controls autoplay loop class="w-full rounded-xl max-h-[520px] bg-black"></video>
       <div class="flex justify-end">
-        <a id="downloadBtn" href="#" download="animacion-ia.mp4" 
+        <a id="downloadBtn" href="#" download="animacion-ia.mp4" target="_blank"
           class="bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium py-2 px-5 rounded-lg transition">
           Descargar MP4
         </a>
@@ -74,17 +72,20 @@
 
   </div>
 
-  <script>
-    let optimizedBase64 = null;
+  <script type="module">
+    import { Client } from "https://cdn.jsdelivr.net/npm/@gradio/client/dist/index.min.js";
 
-    const passInput = document.getElementById('appPassword');
-    passInput.value = localStorage.getItem('studio_pass') || '';
-    passInput.addEventListener('input', () => localStorage.setItem('studio_pass', passInput.value));
+    let imageBlob = null;
 
-    function addPreset(text) {
+    // Guardar el token HF en tu navegador localmente
+    const tokenInput = document.getElementById('hfToken');
+    tokenInput.value = localStorage.getItem('hf_user_token') || '';
+    tokenInput.addEventListener('input', () => localStorage.setItem('hf_user_token', tokenInput.value.trim()));
+
+    window.addPreset = function(text) {
       const promptEl = document.getElementById('prompt');
       promptEl.value = promptEl.value ? `${promptEl.value.trim()}, ${text}` : text;
-    }
+    };
 
     const dropZone = document.getElementById('dropZone');
     const imageInput = document.getElementById('imageInput');
@@ -106,7 +107,7 @@
         const img = new Image();
         img.onload = () => {
           const canvas = document.createElement('canvas');
-          const MAX_SIZE = 768; // Tamaño óptimo para velocidad en API gratuita de HF
+          const MAX_SIZE = 768;
           let width = img.width;
           let height = img.height;
 
@@ -123,10 +124,12 @@
           const ctx = canvas.getContext('2d');
           ctx.drawImage(img, 0, 0, width, height);
 
-          optimizedBase64 = canvas.toDataURL('image/jpeg', 0.85);
-          
+          canvas.toBlob((blob) => {
+            imageBlob = blob;
+          }, 'image/jpeg', 0.88);
+
           const preview = document.getElementById('previewImg');
-          preview.src = optimizedBase64;
+          preview.src = canvas.toDataURL('image/jpeg', 0.88);
           preview.classList.remove('hidden');
           document.getElementById('dropText').classList.add('hidden');
         };
@@ -135,48 +138,58 @@
       reader.readAsDataURL(file);
     }
 
-    async function generateVideo() {
+    document.getElementById('generateBtn').addEventListener('click', async () => {
       const prompt = document.getElementById('prompt').value.trim();
-      const password = passInput.value.trim();
+      const hfToken = tokenInput.value.trim();
 
-      if (!optimizedBase64) return alert('Primero sube una imagen.');
+      if (!imageBlob) return alert('Primero sube una imagen.');
       if (!prompt) return alert('Describe cómo quieres que se mueva la escena.');
 
       const btn = document.getElementById('generateBtn');
       const statusBox = document.getElementById('statusBox');
+      const statusText = document.getElementById('statusText');
       const resultBox = document.getElementById('resultBox');
 
       btn.disabled = true;
       btn.classList.add('opacity-50');
       resultBox.classList.add('hidden');
       statusBox.classList.remove('hidden');
+      statusText.innerText = 'Conectando con el servidor gratuito de Hugging Face...';
 
       try {
-        const res = await fetch('/api/i2v', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            password,
-            prompt,
-            imageUrl: optimizedBase64
-          })
+        const options = hfToken ? { hf_token: hfToken } : {};
+        const client = await Client.connect("Lightricks/ltx-video-distilled", options);
+
+        statusText.innerText = 'Generando vídeo en GPU (puede tardar 20-50 segundos, no cierres la pestaña)...';
+
+        const result = await client.predict("/image_to_video", {
+          image: imageBlob,
+          prompt: prompt,
+          negative_prompt: "worst quality, inconsistent motion, blurry, jittery, distorted",
+          height: 512,
+          width: 704,
+          num_frames: 65,
+          seed: 42,
+          randomize_seed: true
         });
 
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Error generando vídeo');
+        const videoData = result.data[0];
+        const finalUrl = videoData?.video?.url || videoData?.url;
+
+        if (!finalUrl) throw new Error('El servidor no devolvió ningún vídeo. Inténtalo de nuevo.');
 
         const videoEl = document.getElementById('outputVideo');
-        videoEl.src = data.videoUrl;
-        document.getElementById('downloadBtn').href = data.videoUrl;
+        videoEl.src = finalUrl;
+        document.getElementById('downloadBtn').href = finalUrl;
         resultBox.classList.remove('hidden');
       } catch (err) {
-        alert(err.message);
+        alert('Aviso del servidor: ' + err.message);
       } finally {
         btn.disabled = false;
         btn.classList.remove('opacity-50');
         statusBox.classList.add('hidden');
       }
-    }
+    });
   </script>
 </body>
 </html>
