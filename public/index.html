@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="es" class="dark">
 <head>
   <meta charset="UTF-8">
@@ -13,7 +13,7 @@
     <header class="border-b border-zinc-800 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
       <div>
         <h1 class="text-2xl font-bold tracking-tight text-white">Imagen a Vídeo</h1>
-        <p class="text-sm text-zinc-400">Anima cualquier fotografía con Wan I2V</p>
+        <p class="text-sm text-zinc-400">Motor gratuito Hugging Face (LTX-Video)</p>
       </div>
       <input type="password" id="appPassword" placeholder="Clave de acceso" 
         class="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500 w-full sm:w-40" />
@@ -58,7 +58,7 @@
     <!-- Barra de Progreso -->
     <div id="statusBox" class="hidden bg-zinc-900 border border-zinc-800 rounded-2xl p-6 text-center space-y-3">
       <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-500 mx-auto"></div>
-      <p id="statusText" class="text-sm text-zinc-300">Preparando imagen...</p>
+      <p id="statusText" class="text-sm text-zinc-300">Generando vídeo en Hugging Face (tarda 20-50 segundos)...</p>
     </div>
 
     <!-- Resultado Final -->
@@ -77,7 +77,6 @@
   <script>
     let optimizedBase64 = null;
 
-    // Guardar contraseña en el navegador para no escribirla cada vez
     const passInput = document.getElementById('appPassword');
     passInput.value = localStorage.getItem('studio_pass') || '';
     passInput.addEventListener('input', () => localStorage.setItem('studio_pass', passInput.value));
@@ -87,7 +86,6 @@
       promptEl.value = promptEl.value ? `${promptEl.value.trim()}, ${text}` : text;
     }
 
-    // Gestión de Drag & Drop y selección de archivo
     const dropZone = document.getElementById('dropZone');
     const imageInput = document.getElementById('imageInput');
 
@@ -102,14 +100,13 @@
       if (e.target.files[0]) processImage(e.target.files[0]);
     });
 
-    // Redimensiona la imagen en canvas para evitar errores de payload grande en Vercel
     function processImage(file) {
       const reader = new FileReader();
       reader.onload = (event) => {
         const img = new Image();
         img.onload = () => {
           const canvas = document.createElement('canvas');
-          const MAX_SIZE = 1280;
+          const MAX_SIZE = 768; // Tamaño óptimo para velocidad en API gratuita de HF
           let width = img.width;
           let height = img.height;
 
@@ -126,7 +123,7 @@
           const ctx = canvas.getContext('2d');
           ctx.drawImage(img, 0, 0, width, height);
 
-          optimizedBase64 = canvas.toDataURL('image/jpeg', 0.88);
+          optimizedBase64 = canvas.toDataURL('image/jpeg', 0.85);
           
           const preview = document.getElementById('previewImg');
           preview.src = optimizedBase64;
@@ -147,54 +144,31 @@
 
       const btn = document.getElementById('generateBtn');
       const statusBox = document.getElementById('statusBox');
-      const statusText = document.getElementById('statusText');
       const resultBox = document.getElementById('resultBox');
 
       btn.disabled = true;
       btn.classList.add('opacity-50');
       resultBox.classList.add('hidden');
       statusBox.classList.remove('hidden');
-      statusText.innerText = 'Subiendo imagen y arrancando motor Wan I2V...';
 
       try {
-        const startRes = await fetch('/api/i2v', {
+        const res = await fetch('/api/i2v', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            action: 'start',
             password,
             prompt,
             imageUrl: optimizedBase64
           })
         });
 
-        const startData = await startRes.json();
-        if (!startRes.ok) throw new Error(startData.error || 'Error al iniciar');
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Error generando vídeo');
 
-        const { requestId } = startData;
-
-        // Consulta cada 4 segundos hasta que finalice
-        while (true) {
-          await new Promise(r => setTimeout(r, 4000));
-          statusText.innerText = 'Generando vídeo (suele tardar entre 25 y 45 segundos)...';
-
-          const pollRes = await fetch('/api/i2v', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'status', password, requestId })
-          });
-
-          const pollData = await pollRes.json();
-          if (!pollRes.ok) throw new Error(pollData.error || 'Error comprobando estado');
-
-          if (pollData.status === 'COMPLETED') {
-            const videoEl = document.getElementById('outputVideo');
-            videoEl.src = pollData.videoUrl;
-            document.getElementById('downloadBtn').href = pollData.videoUrl;
-            resultBox.classList.remove('hidden');
-            break;
-          }
-        }
+        const videoEl = document.getElementById('outputVideo');
+        videoEl.src = data.videoUrl;
+        document.getElementById('downloadBtn').href = data.videoUrl;
+        resultBox.classList.remove('hidden');
       } catch (err) {
         alert(err.message);
       } finally {
