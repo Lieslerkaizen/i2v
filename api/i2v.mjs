@@ -9,7 +9,7 @@
   }
 
   const FAL_KEY = process.env.FAL_KEY;
-  const ENDPOINT = 'fal-ai/wan-i2v';
+  const ENDPOINT = 'fal-ai/wan/v2.1/image-to-video';
 
   try {
     // 1. Iniciar la generación de vídeo
