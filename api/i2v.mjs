@@ -18,7 +18,7 @@ export default async function handler(req, res) {
     const base64Data = imageUrl.split(',')[1];
 
     const response = await fetch(
-      'https://router.huggingface.co/hf-inference/models/Lightricks/LTX-Video',
+      'https://router.huggingface.co/novita/Wan-AI/Wan2.1-I2V-14B-480P',
       {
         method: 'POST',
         headers: {
